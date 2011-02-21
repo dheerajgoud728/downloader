@@ -5,7 +5,7 @@ import pycurl
 import wx
 from threading import Thread
 import pickle
-
+import time
 
 def getFileName(url):
     directory=os.curdir
@@ -50,14 +50,17 @@ def getFileSize(url, proxy, port, creds):
     return retrieved_body.size
             
 class downloadworker(Thread):
-    def __init__(self, url, start, end, filename, proxy, port, creds):
+    def __init__(self, url, startv, end, filename, proxy, port, creds, prnt):
         self.url = str(url)
-        self.start = int(start)
-        self.end = int(end)
+        self.startv = str(startv)
+        self.end = str(end)
         self.filename = str(filename)
         self.proxy = str(proxy)
         self.port = int(port)
         self.creds = str(creds)
+        self.prnt = prnt
+        self.to_download = end - startv
+        self.downloaded = 0
         Thread.__init__(self)
         #print "=="+url+"=="
     def run(self):
@@ -73,11 +76,16 @@ class downloadworker(Thread):
         c.setopt(pycurl.PROXY, self.proxy)
         c.setopt(pycurl.PROXYPORT, self.port)
         c.setopt(pycurl.PROXYUSERPWD, self.creds)
-        c.setopt(pycurl.PROXYAUTH,8)
+        c.setopt(pycurl.RANGE, self.startv + "-" + self.end)
+        c.setopt(pycurl.NOPROGRESS, 0)
+        c.setopt(pycurl.PROGRESSFUNCTION, self.progress)
         c.perform()
         c.fp.close()
         c.close()
-        
+    def progress(self, download_t, download_d, upload_t, upload_d):
+        self.to_download = download_t
+        self.downloaded = download_d
+
 class downloader(Thread):
     def __init__(self, url, numthreads, filesize, split, filename, proxy, port, creds):
         self.url = str(url)
@@ -88,40 +96,51 @@ class downloader(Thread):
         self.proxy = str(proxy)
         self.port = int(port)
         self.creds = str(creds)
+        self.workerlist = []
+        self.last_downloaded = 0
+        self.stime = time.time()
         Thread.__init__(self)
     def run(self):
-        start = 0
+        startv = 0
         end = 0
-        workerlist = []
         for i in range(0,self.numthreads):
             end = end + self.split
             brk = False
             if end >= self.filesize:
                 end = self.filesize
                 brk = True
-            d_worker = downloadworker(self.url, start, end, self.filename + ".part" + str(i), self.proxy, self.port, self.creds)
-            print d_worker
-            d_worker.run()
-            print d_worker
-            workerlist.append(d_worker)
-            start = end + 1
+            d_worker = downloadworker(self.url, startv, end, self.filename + ".part" + str(i), self.proxy, self.port, self.creds, self)
+            d_worker.start()
+            self.workerlist.append(d_worker)
+            startv = end + 1
             if brk:
                 break
-        for d_worker in workerlist:
+        for d_worker in self.workerlist:
             d_worker.join()
         f = open(self.filename, "wb")  
-        for i in range(0, len(workerlist)):
+        for i in range(0, len(self.workerlist)):
             _f = open(self.filename + ".part" + str(i), "rb")
-            f.write(_f.read)
+            f.write(_f.read())
             _f.close()
         f.close()
         nfilesize = int(os.path.getsize(self.filename))
         if nfilesize == self.filesize:
-            for i in range(0, len(workerlist)):
+            for i in range(0, len(self.workerlist)):
                 os.remove(self.filename + ".part" + str(i))
         else:
             print "output filesize is not equal to input filesize."
-        del workerlist
+        del self.workerlist
+    def get_progress(self):
+        downloaded = 0
+        for d_worker in self.workerlist:
+            downloaded = downloaded + d_worker.downloaded
+        td = time.time() - self.stime
+        self.stime = time.time()
+        speed = (downloaded - self.last_downloaded)/(1024 * td)
+        self.last_downloaded = downloaded
+        rtime = (self.filesize - downloaded)*1024/speed
+        ret = [self.filesize, downloaded, speed, rtime]
+        return ret
 
 class ExamplePanel(wx.Panel):
     def __init__(self, parent, *args, **kwargs):
