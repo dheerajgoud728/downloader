@@ -30,13 +30,6 @@ def get_home_directory():
         homedir = os.path.expanduser("~")
     return homedir + "/.downloader/"
 
-class pbar:
-    def __init__(self):
-        self.size = 0
-        self.down = 0
-
-pbar_arr = []
-
 def getFileName(url):
     directory=os.curdir
 
@@ -339,92 +332,6 @@ class DemoFrame(wx.Frame):
     def OnClose(self, event):
         """Exit application."""
         os._exit(1)
-        
-class runFrame(Thread):
-    def __init__(self, url, numthreads, filesize, split, filename, proxy, port, creds):
-        self.url = str(url)
-        self.numthreads = int(numthreads)
-        self.filesize = int(filesize)
-        self.split = int(float(split) * 1024 * 1024)
-        self.filename = str(filename)
-        self.proxy = str(proxy)
-        self.port = int(port)
-        self.creds = str(creds)
-        self.app = wx.App()
-        self.wid = wx.NewId()
-        self.frame = SmallFrame(self, None, self.wid, title="Downloader")
-        self.downloader_ = downloader(self.frame, str(self.url), self.numthreads, self.filesize, float(self.split), self.filename, self.proxy, self.port, self.creds)
-        Thread.__init__(self)
-    def run(self):
-        self.downloader_.start()
-        self.frame.Show()
-        self.app.MainLoop()
-        
-class SmallFrame(wx.Frame):
-    def __init__(self, prnt, parent, id, title):
-        self.prnt = prnt
-        wx.Frame.__init__(self, parent, id, title)
-
-        self.timer = wx.Timer(self, 1)
-        self.count = 0
-        self.Bind(wx.EVT_TIMER, self.OnTimer, self.timer)
-        panel = wx.Panel(self, -1)
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        hbox1 = wx.BoxSizer(wx.HORIZONTAL)
-        hbox2 = wx.BoxSizer(wx.HORIZONTAL)
-        hbox3 = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.gauge = wx.Gauge(panel, -1, 50, size=(250, 25))
-        self.btn1 = wx.Button(panel, wx.ID_OK)
-        self.btn2 = wx.Button(panel, wx.ID_STOP)
-        self.text = wx.StaticText(panel, -1, 'Task to be done')
-
-        self.Bind(wx.EVT_BUTTON, self.OnOk, self.btn1)
-        self.Bind(wx.EVT_BUTTON, self.OnStop, self.btn2)
-
-        hbox1.Add(self.gauge, 1, wx.ALIGN_CENTRE)
-        hbox2.Add(self.btn1, 1, wx.RIGHT, 10)
-        hbox2.Add(self.btn2, 1)
-        hbox3.Add(self.text, 1)
-        vbox.Add((0, 50), 0)
-        vbox.Add(hbox1, 0, wx.ALIGN_CENTRE)
-        vbox.Add((0, 30), 0)
-        vbox.Add(hbox2, 1, wx.ALIGN_CENTRE)
-        vbox.Add(hbox3, 1, wx.ALIGN_CENTRE)
-        panel.SetSizer(vbox)
-        self.Centre()
-        self.timer.Start(100)
-    def OnOk(self, event):
-        if self.count >= 50:
-            return
-        self.timer.Start(100)
-        self.text.SetLabel('Task in Progress')
-
-    def OnStop(self, event):
-        if self.count == 0 or self.count >= 50 or not self.timer.IsRunning():
-            return
-        self.timer.Stop()
-        self.text.SetLabel('Task Interrupted')
-        wx.Bell()
-
-    def OnTimer(self, event):
-        if(self.prnt.downloader_.is_alive()):
-            res = self.get_progress()
-            self.frame.count = int(res[1] * 50 / res[0])
-            lbl = "Speed : " + str(res[2]) + "kbps Time Left: " + str(int(res[3]/60)) + "m " + str(int(res[3] % 60)) + "s"
-            self.frame.text.SetLabel(lbl)
-        #self.count = self.count +1
-        #ret = self.prnt.downloader_.get_progress()
-        #self.count = int(ret[1]*50/ret[0])
-        #self.gauge.SetValue(self.count)
-        #tyme = str(int(ret[3]/60)) + "m " + str(int(ret[3] % 60)) + "s"
-        #self.text.SetLabel("Speed: " + str(ret[2]) + " kbps" + tyme)
-        else:
-            self.timer.Stop()
-            self.text.SetLabel('Task Completed')
-        if self.count == 50:
-            self.timer.Stop()
-            self.text.SetLabel('Task Completed')
 
 d = os.path.dirname(get_home_directory())
 if not os.path.exists(d):
