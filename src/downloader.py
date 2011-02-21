@@ -271,9 +271,9 @@ class ExamplePanel(wx.Panel):
                 data = [lst.url, lst.filename, lst.filesize, lst.split/(1024*1024), lst.numthreads]
                 storage_arr.append(data)
             elif not lst.success:
-                lst = downloader(lst.url, lst.numthreads, lst.filesize, lst.split, lst.fileName, lst.port, lst.creds)
-                lst.start()
-                self.trds[it] = lst
+                #lst = downloader(lst.url, lst.numthreads, lst.filesize, lst.split, lst.fileName, lst.port, lst.creds)
+                #lst.start()
+                #self.trds[it] = lst
                 data = [lst.url, lst.filename, lst.filesize, lst.split/(1024*1024), lst.numthreads]
                 storage_arr.append(data)
             it += 1
@@ -309,11 +309,15 @@ class DemoFrame(wx.Frame):
     def __init__(self, *args, **kwargs):
         """Create the DemoFrame."""
         wx.Frame.__init__(self, *args, **kwargs)
-
+        
+        favicon = wx.Icon('downloader.ico', wx.BITMAP_TYPE_ICO)
+        self.SetIcon(favicon)
+        
         # Build the menu bar
         MenuBar = wx.MenuBar()
 
         FileMenu = wx.Menu()
+    
         
         item = FileMenu.Append(wx.ID_EXIT, text="&Quit")
         self.Bind(wx.EVT_MENU, self.OnQuit, item)
