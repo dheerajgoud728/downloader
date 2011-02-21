@@ -85,6 +85,7 @@ class downloadworker(Thread):
         self.to_download = end - startv
         self.downloaded = 0
         self.gap = 0
+        self.over = False
         Thread.__init__(self)
     def run(self):
         c = pycurl.Curl()
@@ -97,6 +98,7 @@ class downloadworker(Thread):
         if int(self.startv) >= int(self.end):
             c.fp.close()
             c.close()
+            self.over = True
             return
         c.setopt(pycurl.URL, self.url)
         c.setopt(pycurl.WRITEDATA, c.fp)
@@ -114,9 +116,7 @@ class downloadworker(Thread):
         c.perform()
         c.fp.close()
         c.close()
-        strt = os.path.getsize(self.filename)
-        if strt != self.to_download:
-            self.run()
+        self.over = True
     def progress(self, download_t, download_d, upload_t, upload_d):
         self.to_download = download_t 
         self.downloaded = download_d + self.gap  
@@ -153,21 +153,29 @@ class downloader(Thread):
                 break
         for d_worker in self.workerlist:
             d_worker.join()
-            time.sleep(1)
-        f = open(self.filename, "wb")  
-        for i in range(0, len(self.workerlist)):
-            _f = open(self.filename + ".part" + str(i), "rb")
-            f.write(_f.read())
-            _f.close()
-        f.close()
-        nfilesize = int(os.path.getsize(self.filename))
-        if nfilesize == self.filesize:
+            
+        can_do = True
+        for d_worker in self.workerlist:
+            if not d_worker.over:
+                can_do = False
+                break
+        if can_do:
+            f = open(self.filename, "wb")  
             for i in range(0, len(self.workerlist)):
-                os.remove(self.filename + ".part" + str(i))
-            print "download completed."
-            self.success = True
+                _f = open(self.filename + ".part" + str(i), "rb")
+                f.write(_f.read())
+                _f.close()
+            f.close()
+            nfilesize = int(os.path.getsize(self.filename))
+            if nfilesize == self.filesize:
+                for i in range(0, len(self.workerlist)):
+                    os.remove(self.filename + ".part" + str(i))
+                print "download completed."
+                self.success = True
+            else:
+                print "output filesize is not equal to input filesize."
         else:
-            print "output filesize is not equal to input filesize."
+            print "Download interrupted in the middle."
         #del self.workerlist
 
 def get_progress(trd):
@@ -194,6 +202,10 @@ class ExamplePanel(wx.Panel):
         # A button
         self.button =wx.Button(self, label="Save Info", pos=(50, 180))
         self.Bind(wx.EVT_BUTTON, self.OnClick,self.button)
+        
+        self.cb = wx.CheckBox(self, -1, 'Allow automatic retry?', (300, 180))
+        self.cb.SetValue(True)
+
 
         self.go =wx.Button(self, label="Go", pos=(380, 20))
         self.Bind(wx.EVT_BUTTON, self.OnGo,self.go)
@@ -271,9 +283,11 @@ class ExamplePanel(wx.Panel):
                 data = [lst.url, lst.filename, lst.filesize, lst.split/(1024*1024), lst.numthreads]
                 storage_arr.append(data)
             elif not lst.success:
-                #lst = downloader(lst.url, lst.numthreads, lst.filesize, lst.split, lst.fileName, lst.port, lst.creds)
-                #lst.start()
-                #self.trds[it] = lst
+                if self.cb.GetValue():
+                    print "Tring to download " + lst.url + " again."
+                    lst = downloader(lst.url, lst.numthreads, lst.filesize, lst.split/(1024*1024), lst.filename, lst.proxy, lst.port, lst.creds)
+                    lst.start()
+                    self.trds[it] = lst
                 data = [lst.url, lst.filename, lst.filesize, lst.split/(1024*1024), lst.numthreads]
                 storage_arr.append(data)
             it += 1
