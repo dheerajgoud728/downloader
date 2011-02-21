@@ -7,6 +7,36 @@ from threading import Thread
 import pickle
 import time
 
+
+def get_home_directory():
+    homedir = os.path.expanduser('~')
+    
+    # ...works on at least windows and linux. 
+    # In windows it points to the user's folder 
+    #  (the one directly under Documents and Settings, not My Documents)
+    
+    
+    # In windows, you can choose to care about local versus roaming profiles.
+    # You can fetch the current user's through PyWin32.
+    #
+    # For example, to ask for the roaming 'Application Data' directory:
+    #  (CSIDL_APPDATA asks for the roaming, CSIDL_LOCAL_APPDATA for the local one)
+    #  (See microsoft references for further CSIDL constants)
+    try:
+        from win32com.shell import shellcon, shell            
+        homedir = shell.SHGetFolderPath(0, shellcon.CSIDL_APPDATA, 0, 0)
+     
+    except ImportError: # quick semi-nasty fallback for non-windows/win32com case
+        homedir = os.path.expanduser("~")
+    return homedir + "/.downloader/"
+
+class pbar:
+    def __init__(self):
+        self.size = 0
+        self.down = 0
+
+pbar_arr = []
+
 def getFileName(url):
     directory=os.curdir
 
@@ -61,11 +91,20 @@ class downloadworker(Thread):
         self.prnt = prnt
         self.to_download = end - startv
         self.downloaded = 0
+        self.gap = 0
         Thread.__init__(self)
-        #print "=="+url+"=="
     def run(self):
         c = pycurl.Curl()
-        c.fp = open(self.filename, "wb")
+        c.fp = open(self.filename, "ab")
+        strt = os.path.getsize(self.filename)
+        if strt > 0:
+            self.gap = strt
+            self.startv = str(strt + int(self.startv))
+            self.downloaded = strt
+        if int(self.startv) >= int(self.end):
+            c.fp.close()
+            c.close()
+            return
         c.setopt(pycurl.URL, self.url)
         c.setopt(pycurl.WRITEDATA, c.fp)
         c.setopt(pycurl.FOLLOWLOCATION, 1)
@@ -82,13 +121,15 @@ class downloadworker(Thread):
         c.perform()
         c.fp.close()
         c.close()
+        strt = os.path.getsize(self.filename)
+        if strt != self.to_download:
+            self.run()
     def progress(self, download_t, download_d, upload_t, upload_d):
-        self.to_download = download_t
-        self.downloaded = download_d
+        self.to_download = download_t 
+        self.downloaded = download_d + self.gap  
 
 class downloader(Thread):
-    def __init__(self, frame, url, numthreads, filesize, split, filename, proxy, port, creds):
-        self.frame = frame
+    def __init__(self, url, numthreads, filesize, split, filename, proxy, port, creds):
         self.url = str(url)
         self.numthreads = int(numthreads)
         self.filesize = int(filesize)
@@ -99,6 +140,7 @@ class downloader(Thread):
         self.creds = str(creds)
         self.workerlist = []
         self.last_downloaded = 0
+        self.success = False
         self.stime = time.time()
         Thread.__init__(self)
     def run(self):
@@ -118,12 +160,9 @@ class downloader(Thread):
                 break
         for d_worker in self.workerlist:
             d_worker.join()
+            time.sleep(1)
         f = open(self.filename, "wb")  
         for i in range(0, len(self.workerlist)):
-            res = self.get_progress()
-            self.frame.count = int(res[1] * 50 / res[0])
-            lbl = "Speed : " + str(res[2]) + "kbps Time Left: " + str(int(res[3]/60)) + "m " + str(int(res[3] % 60)) + "s"
-            self.frame.text.SetLabel(lbl)
             _f = open(self.filename + ".part" + str(i), "rb")
             f.write(_f.read())
             _f.close()
@@ -132,27 +171,33 @@ class downloader(Thread):
         if nfilesize == self.filesize:
             for i in range(0, len(self.workerlist)):
                 os.remove(self.filename + ".part" + str(i))
+            print "download completed."
+            self.success = True
         else:
             print "output filesize is not equal to input filesize."
-        del self.workerlist
-    
-    def get_progress(self):
-        downloaded = 0
-        for d_worker in self.workerlist:
-            downloaded = downloaded + d_worker.downloaded
-        td = time.time() - self.stime
-        self.stime = time.time()
-        speed = (downloaded - self.last_downloaded)/(1024 * td)
-        self.last_downloaded = downloaded
-        rtime = (self.filesize - downloaded)*1024/speed
-        ret = [self.filesize, downloaded, speed, rtime]
-        return ret
+        #del self.workerlist
+
+def get_progress(trd):
+    downloaded = 0
+    for d_worker in trd.workerlist:
+        downloaded = downloaded + d_worker.downloaded
+    td = time.time() - trd.stime
+    trd.stime = time.time()
+    speed = float(downloaded - trd.last_downloaded)/(1024 * td)
+    trd.last_downloaded = downloaded
+    if speed != 0:
+        rtime = int((trd.filesize - downloaded)/(speed*1024))
+    else:
+        rtime = 0
+    ret = [trd.filesize, downloaded, speed, rtime]
+    return ret
 
 class ExamplePanel(wx.Panel):
     def __init__(self, parent, *args, **kwargs):
         wx.Panel.__init__(self, parent, *args, **kwargs)
         self.SetLabel('Downloader')
-        self.SetSize((500,500))
+        self.SetSize((700,500))
+        self.trds = []
         # A button
         self.button =wx.Button(self, label="Save Info", pos=(50, 180))
         self.Bind(wx.EVT_BUTTON, self.OnClick,self.button)
@@ -180,36 +225,91 @@ class ExamplePanel(wx.Panel):
         self.passfld = wx.TextCtrl(self, value=data[3], pos=(90,150), size=(140,-1), style=wx.TE_PASSWORD)
         
         lid = wx.NewId()
-        self.downlst = wx.ListCtrl(self, lid, pos =(30,220), size=(450,200), style=wx.LC_REPORT|wx.SUNKEN_BORDER)
+        self.downlst = wx.ListCtrl(self, lid, pos =(30,220), size=(650,200), style=wx.LC_REPORT|wx.SUNKEN_BORDER)
         self.downlst.Show(True)
-        self.downlst.InsertColumn(0,"Filename")
-        self.downlst.InsertColumn(1,"URL")
-        self.downlst.InsertColumn(2,"Progress")
-        self.downlst.InsertColumn(3,"Speed")
+        self.downlst.InsertColumn(0,"Filename", width=150)
+        self.downlst.InsertColumn(1,"URL", width=150)
+        self.downlst.InsertColumn(2,"Progress", width=60)
+        self.downlst.InsertColumn(3,"Speed", width=60)
+        self.downlst.InsertColumn(4,"Time Remaining", width=120)
+
+        self.timer = wx.Timer(self, 1)
+        self.Bind(wx.EVT_TIMER, self.OnTimer, self.timer)
+        self.timer.Start(1000)
+
+        self.prev_data = []
+        try:
+            with open(get_home_directory() + "dwDetails.dat","rb") as f: 
+                self.prev_data = pickle.load(f)
+        except IOError as (errno, strerror):
+            None
+        
+        for item in self.prev_data:
+            if wx.MessageBox("Do you want to continue this download?\n" + str(item[0]), "Interrupted Download", wx.YES_NO) == wx.YES:
+                _downloader = downloader(item[0], int(item[4]), int(item[2]), float(item[3]), str(item[1]), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
+                _downloader.start()
+                self.trds.append(_downloader)
+      
+    def OnTimer(self, event):
+        storage_arr = []
+        self.downlst.ClearAll()
+        self.downlst.InsertColumn(0,"Filename", width=150)
+        self.downlst.InsertColumn(1,"URL", width=150)
+        self.downlst.InsertColumn(2,"Progress", width=80)
+        self.downlst.InsertColumn(3,"Speed", width=100)
+        self.downlst.InsertColumn(4,"Time Remaining", width=120)
+        it = 0
+        for lst in self.trds:
+            if lst.isAlive():
+                res = get_progress(lst)
+                percentage = str(float(res[1]*100/res[0]))
+                percentage = str(percentage[:6]) + "%"
+                speed = res[2]
+                if int(speed) > 900:
+                    speed = str(float(speed)/1024)[:6] + "mbps"
+                else:
+                    speed = str(speed)[:6] + "kbps"
+                trm = str(int(res[3]/60)) + "m " + str(int(res[3] % 60)) + "s"
+                indx = self.downlst.InsertStringItem(it, lst.filename)
+                self.downlst.SetStringItem(indx, 1,lst.url)
+                self.downlst.SetStringItem(indx, 2,percentage)
+                self.downlst.SetStringItem(indx, 3,speed)
+                self.downlst.SetStringItem(indx, 4,trm)
+                data = [lst.url, lst.filename, lst.filesize, lst.split/(1024*1024), lst.numthreads]
+                storage_arr.append(data)
+            elif not lst.success:
+                lst = downloader(lst.url, lst.numthreads, lst.filesize, lst.split, lst.fileName, lst.port, lst.creds)
+                lst.start()
+                self.trds[it] = lst
+                data = [lst.url, lst.filename, lst.filesize, lst.split/(1024*1024), lst.numthreads]
+                storage_arr.append(data)
+            it += 1
+        f = open(get_home_directory() + "dwDetails.dat","wb")
+        pickle.dump(storage_arr, f)
+        f.close()
+
     def OnClick(self,event):
         try:
-            with open("settings.dat", "wb") as f:
+            with open(get_home_directory() + "settings.dat", "wb") as f:
                 ndata = [self.proxyfld.Value,self.portfld.Value,self.userfld.Value,self.passfld.Value]
                 pickle.dump(ndata, f)
         except IOError as (errno, strerror):
             None
     def OnGo(self,event):
-        #try:       
+        try:       
             filesize = getFileSize(str(self.urlfld.Value), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
             filename = getFileName(str(self.urlfld.Value))
-            print ("fname="+filename)
-            print filesize
             numthreads = int(filesize/(float(self.splitfld.Value)*1024*1024)) + 1
-            print numthreads
             dialog = wx.FileDialog ( None, style = wx.SAVE | wx.OVERWRITE_PROMPT )
             dialog.SetFilename(filename)
             if dialog.ShowModal() == wx.ID_OK:
                 print 'Selected:', dialog.GetPath()
-                _downloader = runFrame(str(self.urlfld.Value), numthreads, filesize, float(self.splitfld.Value), str(dialog.GetPath()), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
+                _downloader = downloader(str(self.urlfld.Value), numthreads, filesize, float(self.splitfld.Value), str(dialog.GetPath()), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
                 _downloader.start()
+                self.trds.append(_downloader)
             dialog.Destroy()
-        #except ValueError:
-        #    wx.MessageBox("Please check all fields", "Error")
+        except ValueError:
+            wx.MessageBox("Please check all fields", "Error")
         
 class DemoFrame(wx.Frame):
     """Main Frame holding the Panel."""
@@ -227,16 +327,19 @@ class DemoFrame(wx.Frame):
 
         MenuBar.Append(FileMenu, "&File")
         self.SetMenuBar(MenuBar)
-
         # Add the Widget Panel
         self.Panel = ExamplePanel(self)
-
         self.Fit()
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
 
     def OnQuit(self, event=None):
         """Exit application."""
-        self.Close()
-
+        os._exit(1)
+        
+    def OnClose(self, event):
+        """Exit application."""
+        os._exit(1)
+        
 class runFrame(Thread):
     def __init__(self, url, numthreads, filesize, split, filename, proxy, port, creds):
         self.url = str(url)
@@ -305,19 +408,30 @@ class SmallFrame(wx.Frame):
         wx.Bell()
 
     def OnTimer(self, event):
+        if(self.prnt.downloader_.is_alive()):
+            res = self.get_progress()
+            self.frame.count = int(res[1] * 50 / res[0])
+            lbl = "Speed : " + str(res[2]) + "kbps Time Left: " + str(int(res[3]/60)) + "m " + str(int(res[3] % 60)) + "s"
+            self.frame.text.SetLabel(lbl)
         #self.count = self.count +1
         #ret = self.prnt.downloader_.get_progress()
         #self.count = int(ret[1]*50/ret[0])
         #self.gauge.SetValue(self.count)
         #tyme = str(int(ret[3]/60)) + "m " + str(int(ret[3] % 60)) + "s"
         #self.text.SetLabel("Speed: " + str(ret[2]) + " kbps" + tyme)
+        else:
+            self.timer.Stop()
+            self.text.SetLabel('Task Completed')
         if self.count == 50:
             self.timer.Stop()
             self.text.SetLabel('Task Completed')
 
+d = os.path.dirname(get_home_directory())
+if not os.path.exists(d):
+    os.makedirs(d)
 data = ["202.141.80.20", "3128", "username", "password"]
 try:
-    with open("settings.dat","rb") as f: 
+    with open(get_home_directory() + "settings.dat","rb") as f: 
         data = pickle.load(f)
 except IOError as (errno, strerror):
     None
@@ -325,11 +439,3 @@ app = wx.App()
 frame = DemoFrame(None, title="Downloader")
 frame.Show()
 app.MainLoop()
-'''
-url = raw_input("Enter url:")
-filesize = getFileSize(url)
-filename = getFileName(url)
-print ("fname="+filename)
-print filesize
-numthreads = int(filesize/50000000)
-'''
