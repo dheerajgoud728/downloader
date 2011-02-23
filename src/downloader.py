@@ -43,20 +43,57 @@ def getFileName(url):
 
 class Storage:
     def __init__(self):
-        self.contents = ''
+        #self.contents = ''
         self.line = 0
         self.size = 0
+        self.type = ""
+        self.http = ""
+        self.connection = ""
+        self.location = ""
     def store(self, buf):
+        print buf[:len(buf) - 1]
+        if self.line == 0:
+            #npos = buf.find('\n')
+            self.http = buf[:len(buf) - 1]
+        pos = buf.find("Content-Type: ")
+        if pos != -1:
+            epos = buf.find('\n', pos)
+            self.type = buf[pos+14:epos]
+        pos = buf.find("Location: ")
+        if pos != -1:
+            epos = buf.find('\n', pos)
+            self.location = buf[pos+10:epos]
         pos = buf.find("Content-Length: ")
         if pos != -1:
             epos = buf.find('\n', pos)
             self.size = int(buf[pos+16:epos])
         self.line = self.line + 1
-        self.contents = "%s%i: %s" % (self.contents, self.line, buf)
-    def __str__(self):
-        return self.contents
+        #self.contents = "%s%i: %s" % (self.contents, self.line, buf)
+    #def __str__(self):
+    #    return self.contents
+def store_cookie(url, proxy, port, creds, site, post):
+    #retrieved_body = Storage()
+    dir = get_home_directory()
+    c = pycurl.Curl()
+    c.setopt(c.URL, url)
+    c.setopt(pycurl.PROXY, proxy)
+    c.setopt(pycurl.PROXYPORT, port)
+    c.setopt(pycurl.PROXYTYPE, pycurl.PROXYTYPE_HTTP) 
+    c.setopt(pycurl.PROXYUSERPWD, creds)
+    c.setopt(pycurl.HEADER, 1)
+    c.setopt(pycurl.POSTFIELDS, str(post))
+    c.setopt(pycurl.COOKIEFILE, dir + str(site) + ".txt")
+    c.setopt(pycurl.COOKIEJAR, dir + str(site) + ".txt")
+    #c.setopt(c.WRITEFUNCTION, retrieved_body.store)
+    c.perform()
+    c.close()
+    #return retrieved_body
 
 def getFileSize(url, proxy, port, creds):
+    #print url
+    #print proxy
+    #print port
+    #print creds
     retrieved_body = Storage()
     c = pycurl.Curl()
     c.setopt(c.URL, url)
@@ -67,10 +104,11 @@ def getFileSize(url, proxy, port, creds):
     c.setopt(pycurl.HEADER, 1)
     c.setopt(pycurl.NOPROGRESS, 1)
     c.setopt(pycurl.NOBODY, 1)
+    c.setopt(pycurl.FOLLOWLOCATION, 1)
     c.setopt(c.WRITEFUNCTION, retrieved_body.store)
     c.perform()
     c.close()
-    return retrieved_body.size
+    return retrieved_body
             
 class downloadworker(Thread):
     def __init__(self, url, startv, end, filename, proxy, port, creds, prnt):
@@ -111,6 +149,7 @@ class downloadworker(Thread):
         c.setopt(pycurl.PROXYPORT, self.port)
         c.setopt(pycurl.PROXYUSERPWD, self.creds)
         c.setopt(pycurl.RANGE, self.startv + "-" + self.end)
+        c.setopt(pycurl.FOLLOWLOCATION, 1)
         c.setopt(pycurl.NOPROGRESS, 0)
         c.setopt(pycurl.PROGRESSFUNCTION, self.progress)
         c.perform()
@@ -174,6 +213,8 @@ class downloader(Thread):
                 self.success = True
             else:
                 print "output filesize is not equal to input filesize."
+                print nfilesize
+                print self.filesize
         else:
             print "Download interrupted in the middle."
         #del self.workerlist
@@ -304,8 +345,26 @@ class ExamplePanel(wx.Panel):
             None
     def OnGo(self,event):
         try:       
-            filesize = getFileSize(str(self.urlfld.Value), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
-            filename = getFileName(str(self.urlfld.Value))
+            header = getFileSize(str(self.urlfld.Value), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
+            print header.location
+            #time.sleep(2)
+            #if len(header.location) != 0:
+                #print "in if"
+                #self.urlfld.Value = str(header.location)
+                #header = getFileSize(str(self.urlfld.Value), str(self.proxyfld.Value), int(self.portfld.Value), str(self.userfld.Value+":"+self.passfld.Value))
+            filesize = header.size
+            http = header.http
+            type = header.type
+            location = header.location
+            print "file_size: " + str(filesize)
+            print "file_type: " + str(type)
+            print "http :" + str(http)
+            print "location :" + str(location)
+            filename = ""
+            if len(header.location) != 0:
+                filename = getFileName(header.location)
+            else:
+                filename = getFileName(str(self.urlfld.Value))
             numthreads = int(filesize/(float(self.splitfld.Value)*1024*1024)) + 1
             dialog = wx.FileDialog ( None, style = wx.SAVE | wx.OVERWRITE_PROMPT )
             dialog.SetFilename(filename)
