@@ -22,10 +22,10 @@ def get_home_directory():
     #  (CSIDL_APPDATA asks for the roaming, CSIDL_LOCAL_APPDATA for the local one)
     #  (See microsoft references for further CSIDL constants)
     try:
-        from win32com.shell import shellcon, shell        
+        from win32com.shell import shellcon, shell
         homedir = shell.SHGetFolderPath(0, shellcon.CSIDL_APPDATA, 0, 0)
      
-    except: # quick semi-nasty fallback for non-windows/win32com case
+    except ImportError: # quick semi-nasty fallback for non-windows/win32com case
         homedir = os.path.expanduser("~")
     return homedir + "/.downloader/"
 
